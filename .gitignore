@@ -1,0 +1,9 @@
+.next/
+node_modules/
+out/
+out-staging/
+out-production/
+.env.local
+coverage/
+content-snapshot.json
+*.tsbuildinfo

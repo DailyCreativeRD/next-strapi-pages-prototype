@@ -1,0 +1,85 @@
+name: Build and deploy staging
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [publish-stage]
+
+concurrency:
+  group: staging-pages
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify-and-build:
+    runs-on: ubuntu-latest
+    outputs:
+      production_artifact_id: ${{ steps.production-artifact.outputs.artifact-id }}
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run tests
+        run: pnpm test
+
+      - name: Type-check
+        run: pnpm typecheck
+
+      - name: Build staging artifact
+        env:
+          STRAPI_API_URL: ${{ secrets.STRAPI_API_URL }}
+          STRAPI_API_TOKEN: ${{ secrets.STRAPI_API_TOKEN }}
+          NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
+          DEPLOYMENT_LABEL: staging
+        run: pnpm build && mv out out-staging
+
+      - name: Build production-ready counterpart from the same published content
+        env:
+          STRAPI_API_URL: ${{ secrets.STRAPI_API_URL }}
+          STRAPI_API_TOKEN: ${{ secrets.STRAPI_API_TOKEN }}
+          NEXT_PUBLIC_BASE_PATH: /${{ vars.PRODUCTION_REPOSITORY_NAME }}
+          DEPLOYMENT_LABEL: production-candidate
+        run: pnpm build && mv out out-production
+
+      - name: Preserve production-ready artifact
+        id: production-artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-site-${{ github.run_id }}
+          path: out-production
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload staging Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: out-staging
+
+  deploy-staging:
+    needs: verify-and-build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy staging Pages site
+        id: deployment
+        uses: actions/deploy-pages@v4
