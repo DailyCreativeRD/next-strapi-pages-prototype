@@ -5,7 +5,7 @@ This repository verifies the first half of the publishing workflow:
 1. Fetch published content from Strapi during a static build.
 2. Run tests and type checking.
 3. Build and deploy a staging GitHub Pages site.
-4. Preserve a production-ready artifact generated during the same staging run.
+4. Publish a checksum-protected production candidate as a run-specific GitHub Release.
 
 ## Local setup
 
@@ -33,4 +33,4 @@ Configure this repository variable:
 
 Under **Settings -> Pages**, choose **GitHub Actions** as the publishing source.
 
-Run **Build and deploy staging** manually from the Actions tab. Record its run ID; the production repository uses that ID to promote `production-site-<run-id>`.
+Run **Build and deploy staging** manually from the Actions tab. Record its run ID; the production repository uses that ID to download and promote the matching release asset without a personal access token.
