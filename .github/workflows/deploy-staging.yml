@@ -10,14 +10,11 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   verify-and-build:
     runs-on: ubuntu-latest
-    outputs:
-      production_artifact_id: ${{ steps.production-artifact.outputs.artifact-id }}
-
     steps:
       - name: Checkout source
         uses: actions/checkout@v7
@@ -65,23 +62,6 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      - name: Package production candidate with checksum
-        shell: bash
-        run: |
-          archive="production-site-${{ github.run_id }}.zip"
-          (cd out-production && zip -r "../$archive" .)
-          sha256sum "$archive" > "$archive.sha256"
-
-      - name: Publish production candidate release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "staging-${{ github.run_id }}" \
-            "production-site-${{ github.run_id }}.zip" \
-            "production-site-${{ github.run_id }}.zip.sha256" \
-            --title "Staging candidate ${{ github.run_id }}" \
-            --notes "Production-ready counterpart of staging workflow run ${{ github.run_id }}."
-
       - name: Upload staging Pages artifact
         uses: actions/upload-pages-artifact@v4
         with:
@@ -99,4 +79,35 @@ jobs:
     steps:
       - name: Deploy staging Pages site
         id: deployment
+        env:
+          NODE_OPTIONS: --use-system-ca
         uses: actions/deploy-pages@v4
+
+  publish-production-candidate:
+    needs: [verify-and-build, deploy-staging]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download production-ready artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: production-site-${{ github.run_id }}
+          path: out-production
+
+      - name: Package production candidate with checksum
+        shell: bash
+        run: |
+          archive="production-site-${{ github.run_id }}.zip"
+          (cd out-production && zip -r "../$archive" .)
+          sha256sum "$archive" > "$archive.sha256"
+
+      - name: Publish production candidate release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "staging-${{ github.run_id }}" \
+            "production-site-${{ github.run_id }}.zip" \
+            "production-site-${{ github.run_id }}.zip.sha256" \
+            --title "Staging candidate ${{ github.run_id }}" \
+            --notes "Production-ready counterpart of successful staging workflow run ${{ github.run_id }}."
