@@ -98,7 +98,7 @@ jobs:
         id: deployment
         env:
           NODE_OPTIONS: --use-system-ca
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
 
   publish-production-candidate:
     needs: [verify-and-build, deploy-staging]
