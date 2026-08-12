@@ -105,6 +105,7 @@ jobs:
       - name: Publish production candidate release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           gh release create "staging-${{ github.run_id }}" \
             "production-site-${{ github.run_id }}.zip" \
