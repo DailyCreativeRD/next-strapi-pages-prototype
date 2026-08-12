@@ -9,6 +9,8 @@ This repository verifies the first half of the publishing workflow:
 
 ## Local setup
 
+Use Node.js 24 LTS and pnpm 10.
+
 Copy `.env.example` to `.env.local`, add a read-only Strapi token, then run:
 
 ```powershell
