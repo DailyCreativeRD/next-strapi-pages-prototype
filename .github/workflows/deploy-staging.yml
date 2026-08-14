@@ -16,8 +16,12 @@ jobs:
   verify-and-build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout source
+      # Frontend code lives in its own repository; this repo only orchestrates.
+      - name: Checkout frontend source
         uses: actions/checkout@v7
+        with:
+          repository: DailyCreativeRD/ssg-nextjs-page
+          ref: main
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
@@ -43,7 +47,10 @@ jobs:
           STRAPI_API_TOKEN: ${{ secrets.STRAPI_API_TOKEN }}
           NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
           DEPLOYMENT_LABEL: staging
-        run: pnpm build && mv out out-staging
+        run: |
+          pnpm build
+          mv out out-staging
+          mv content-hash.txt hash-staging.txt
 
       - name: Build production-ready counterpart from the same published content
         env:
@@ -51,7 +58,26 @@ jobs:
           STRAPI_API_TOKEN: ${{ secrets.STRAPI_API_TOKEN }}
           NEXT_PUBLIC_BASE_PATH: /${{ vars.PRODUCTION_REPOSITORY_NAME }}
           DEPLOYMENT_LABEL: production-candidate
-        run: pnpm build && mv out out-production
+        run: |
+          pnpm build
+          mv out out-production
+          mv content-hash.txt hash-production.txt
+
+      # Fail the whole run if Strapi content changed between the two builds.
+      # Guarantees: what the reviewer sees on staging == the production candidate.
+      - name: Verify both builds used identical content
+        run: diff hash-staging.txt hash-production.txt
+
+      # Identity record that travels inside the candidate ZIP.
+      # frontend_sha is the checked-out ssg-nextjs-page commit.
+      - name: Write release manifest
+        run: |
+          printf '%s\n' \
+            "source_sha=${{ github.sha }}" \
+            "frontend_sha=$(git rev-parse HEAD)" \
+            "run_id=${{ github.run_id }}" \
+            "content_sha256=$(cat hash-production.txt)" \
+            > out-production/release-manifest.txt
 
       - name: Preserve production-ready artifact
         id: production-artifact
