@@ -16,12 +16,17 @@ jobs:
   verify-and-build:
     runs-on: ubuntu-latest
     steps:
-      # Frontend code lives in its own repository; this repo only orchestrates.
+      # Frontend code lives in its own (private) repository; this repo only
+      # orchestrates. The fine-grained PAT has Contents:read on that repo only.
+      # persist-credentials: false keeps the token out of .git/config during
+      # the untrusted install/build steps.
       - name: Checkout frontend source
         uses: actions/checkout@v7
         with:
           repository: DailyCreativeRD/ssg-nextjs-page
           ref: main
+          token: ${{ secrets.FRONTEND_REPO_TOKEN }}
+          persist-credentials: false
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
