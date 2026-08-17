@@ -1,0 +1,6 @@
+name = "phihong-images"
+main = "src/index.js"
+compatibility_date = "2026-08-01"
+
+[vars]
+GCS_BUCKET = "phihong-media-dev"
