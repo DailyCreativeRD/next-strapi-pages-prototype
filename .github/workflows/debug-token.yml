@@ -1,0 +1,26 @@
+name: Debug frontend token
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe FRONTEND_REPO_TOKEN
+        env:
+          GH_TOKEN: ${{ secrets.FRONTEND_REPO_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "RESULT: secret is EMPTY"
+            exit 1
+          fi
+          echo "RESULT: secret is set (length ${#GH_TOKEN})"
+          if gh api repos/DailyCreativeRD/ssg-nextjs-page --jq .full_name; then
+            echo "RESULT: token CAN read the frontend repo"
+          else
+            echo "RESULT: token CANNOT read the frontend repo"
+            exit 1
+          fi
