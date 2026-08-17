@@ -18,8 +18,6 @@ jobs:
     steps:
       # Frontend code lives in its own (private) repository; this repo only
       # orchestrates. The fine-grained PAT has Contents:read on that repo only.
-      # persist-credentials: false keeps the token out of .git/config during
-      # the untrusted install/build steps.
       - name: Checkout frontend source
         uses: actions/checkout@v7
         with:
@@ -46,96 +44,83 @@ jobs:
       - name: Type-check
         run: pnpm typecheck
 
-      - name: Build staging artifact
+      # ONE build, root path: Cloudflare Pages serves both environments at /,
+      # so this output is simultaneously the staging deploy and the production
+      # candidate. Image URLs are rewritten to IMAGES_BASE_URL during the build.
+      - name: Build static site
         env:
           STRAPI_API_URL: ${{ secrets.STRAPI_API_URL }}
           STRAPI_API_TOKEN: ${{ secrets.STRAPI_API_TOKEN }}
-          NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
-          DEPLOYMENT_LABEL: staging
-        run: |
-          pnpm build
-          mv out out-staging
-          mv content-hash.txt hash-staging.txt
-
-      - name: Build production-ready counterpart from the same published content
-        env:
-          STRAPI_API_URL: ${{ secrets.STRAPI_API_URL }}
-          STRAPI_API_TOKEN: ${{ secrets.STRAPI_API_TOKEN }}
-          NEXT_PUBLIC_BASE_PATH: /${{ vars.PRODUCTION_REPOSITORY_NAME }}
-          DEPLOYMENT_LABEL: production-candidate
-        run: |
-          pnpm build
-          mv out out-production
-          mv content-hash.txt hash-production.txt
-
-      # Fail the whole run if Strapi content changed between the two builds.
-      # Guarantees: what the reviewer sees on staging == the production candidate.
-      - name: Verify both builds used identical content
-        run: diff hash-staging.txt hash-production.txt
+          IMAGES_BASE_URL: ${{ vars.IMAGES_BASE_URL }}
+          GCS_BUCKET_NAME: ${{ vars.GCS_BUCKET_NAME }}
+          DEPLOYMENT_LABEL: published
+        run: pnpm build
 
       # Identity record that travels inside the candidate ZIP.
-      # frontend_sha is the checked-out ssg-nextjs-page commit.
       - name: Write release manifest
+        env:
+          IMAGES_BASE_URL: ${{ vars.IMAGES_BASE_URL }}
         run: |
           printf '%s\n' \
             "source_sha=${{ github.sha }}" \
             "frontend_sha=$(git rev-parse HEAD)" \
             "run_id=${{ github.run_id }}" \
-            "content_sha256=$(cat hash-production.txt)" \
-            > out-production/release-manifest.txt
+            "content_sha256=$(cat content-hash.txt)" \
+            "images_base=${IMAGES_BASE_URL}" \
+            > out/release-manifest.txt
 
       - name: Preserve production-ready artifact
-        id: production-artifact
         uses: actions/upload-artifact@v7
         with:
           name: production-site-${{ github.run_id }}
-          path: out-production
+          path: out
           retention-days: 30
-          if-no-files-found: error
-
-      - name: Archive staging Pages artifact
-        shell: bash
-        run: |
-          tar \
-            --dereference \
-            --hard-dereference \
-            --directory out-staging \
-            --create \
-            --file "$RUNNER_TEMP/artifact.tar" \
-            --exclude=.git \
-            --exclude=.github \
-            --exclude='.[^/]*' \
-            .
-
-      - name: Upload staging Pages artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: github-pages
-          path: ${{ runner.temp }}/artifact.tar
-          retention-days: 1
           if-no-files-found: error
 
   deploy-staging:
     needs: verify-and-build
     runs-on: ubuntu-latest
     permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      contents: read
     steps:
-      - name: Deploy staging Pages site
-        id: deployment
+      - name: Download built site
+        uses: actions/download-artifact@v8
+        with:
+          name: production-site-${{ github.run_id }}
+          path: out
+
+      - name: Deploy to Cloudflare Pages (staging)
         env:
-          NODE_OPTIONS: --use-system-ca
-        uses: actions/deploy-pages@v5
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          npx wrangler@4 pages project create phihong-stage --production-branch=main \
+            || echo "project already exists"
+          npx wrangler@4 pages deploy out --project-name=phihong-stage --branch=main --commit-dirty=true
+
+      # Dormant until a CLOUDFLARE_ZONE_ID secret exists (i.e. a custom domain).
+      # Pages self-invalidates and image URLs are immutable, so nothing needs
+      # purging before then.
+      - name: Purge Cloudflare cache
+        env:
+          CF_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$CF_ZONE_ID" ]; then
+            echo "::notice::No CLOUDFLARE_ZONE_ID configured yet - skipping cache purge."
+          else
+            curl --fail -X POST "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/purge_cache" \
+              -H "Authorization: Bearer ${CF_TOKEN}" \
+              -H "Content-Type: application/json" \
+              --data '{"purge_everything":true}'
+          fi
 
   publish-production-candidate:
     needs: [verify-and-build, deploy-staging]
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write   # GitHub Releases count as repository contents
+
     steps:
       - name: Download production-ready artifact
         uses: actions/download-artifact@v8
